@@ -1,0 +1,4 @@
+[submodule "submodules/deep-person-reid"]
+	path = submodules/deep-person-reid
+	url = https://github.com/KaiyangZhou/deep-person-reid.git
+
