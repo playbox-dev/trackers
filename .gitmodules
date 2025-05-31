@@ -2,3 +2,6 @@
 	path = submodules/deep-person-reid
 	url = https://github.com/KaiyangZhou/deep-person-reid.git
 
+[submodule "deep-person-reid"]
+	path = deep-person-reid
+	url = https://github.com/KaiyangZhou/deep-person-reid.git
