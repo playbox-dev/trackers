@@ -13,6 +13,6 @@ try:
 except ImportError:
     logger.warning(
         "ReIDModel dependencies not installed. ReIDModel will not be available. "
-        "Please run `pip install trackers[reid]` and try again."
+        "Please run `uv pip install trackers[reid]` and try again."
     )
     pass

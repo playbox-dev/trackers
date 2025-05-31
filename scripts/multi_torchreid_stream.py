@@ -8,6 +8,7 @@ from trackers import DeepSORTTracker, ReIDModel
 from torchreid.reid.utils.feature_extractor import FeatureExtractor
 from typing import Dict, List, Tuple, Optional, Any
 import matplotlib.pyplot as plt
+import os
 
 
 
@@ -331,7 +332,7 @@ def draw_bird_eye_view(office_map, detections_list, H_list, track_history, max_h
 #     """
 #     カメラからのアノテート済み映像群と鳥瞰図を受け取り、
 #     上段にカメラ映像を横連結、下段に鳥瞰図を同じ幅でリサイズして縦連結した
-#     “2段構成” の出力フレームを返す。
+#     "2段構成" の出力フレームを返す。
 
 #     Args:
 #         annotated_frames: 各カメラ映像にBBoxやIDラベルを描画した後の画像リスト
@@ -441,7 +442,13 @@ def is_streaming_source(source_path):
 
 
 # --- マルチカメラ処理 ---
-def multi_camera_tracking(source_paths, output_path, office_map_path, homography_matrices):
+def multi_camera_tracking(source_videos, output_path, office_map_path, homography_matrices):
+    # 出力ディレクトリを自動作成
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+        print(f"出力ディレクトリを作成しました: {output_dir}")
+
     # 1) 共通コンポーネント準備
     model = YOLO("yolo11s.pt")
     extractor = FeatureExtractor(
@@ -450,7 +457,7 @@ def multi_camera_tracking(source_paths, output_path, office_map_path, homography
         image_size=(256, 128),
     )
     wrapped_reid = TorchReIDWrapper(extractor)
-    tracker_list = [DeepSORTTracker(reid_model=wrapped_reid) for _ in source_paths]
+    tracker_list = [DeepSORTTracker(reid_model=wrapped_reid) for _ in source_videos]
 
     box_annotator = sv.BoxAnnotator(thickness=2)
     label_annotator = sv.LabelAnnotator(
@@ -473,15 +480,15 @@ def multi_camera_tracking(source_paths, output_path, office_map_path, homography
     H_list = homography_matrices
 
     # 2) VideoCapture 準備
-    caps = [cv2.VideoCapture(p) for p in source_paths]
+    caps = [cv2.VideoCapture(p) for p in source_videos]
     ret0, frame0 = caps[0].read()
     if not ret0:
-        raise RuntimeError(f"Failed to read from {source_paths[0]}")
+        raise RuntimeError(f"Failed to read from {source_videos[0]}")
     h, w = frame0.shape[:2]
     # fps = caps[0].get(cv2.CAP_PROP_FPS)
 
     # 入力ソースの種類に応じてFPSを設定
-    is_streaming = any(is_streaming_source(p) for p in source_paths)
+    is_streaming = any(is_streaming_source(p) for p in source_videos)
     if is_streaming:
         # ストリーミング映像の場合は固定FPS
         fps = 10.0
@@ -734,7 +741,7 @@ if __name__ == "__main__":
     ]
 
     # 出力ビデオパス
-    output_path = "/home/ishii/projects/pbox_trackers/results/v2_stream_sample.mp4"
+    output_path = "/home/ishii/projects/v1_thinklet_cube_mcmot/results/v2_stream_sample.mp4"
 
     # オフィスマップのパス
     office_map_path = "/home/ishii/projects/pbox_trackers/results/office.png"
@@ -758,6 +765,12 @@ if __name__ == "__main__":
     H1 = np.load(H1_path, allow_pickle=True)
     H2 = np.load(H2_path, allow_pickle=True)
     homography_matrices = [H1, H2]
+
+    # 出力ディレクトリを自動作成
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+        print(f"出力ディレクトリを作成しました: {output_dir}")
 
     # トラッキング実行
     multi_camera_tracking(source_videos, output_path, office_map_path, homography_matrices)
