@@ -2,7 +2,9 @@ import cv2
 import torch
 import numpy as np
 import supervision as sv
-from ultralytics import YOLO
+from rfdetr import RFDETRBase
+from rfdetr.util.coco_classes import COCO_CLASSES
+from inference import get_model
 from collections import deque
 from trackers import DeepSORTTracker, ReIDModel
 from torchreid.reid.utils.feature_extractor import FeatureExtractor
@@ -295,101 +297,6 @@ def draw_bird_eye_view(office_map, detections_list, H_list, track_history, max_h
     return result, colors, track_history
 
 
-# --- 2x2グリッドレイアウト作成関数 ---
-# def create_grid_layout(frames, bird_eye_view):
-#     """
-#     frames: カメラからの映像のリスト
-#     bird_eye_view: 鳥瞰図視点の軌跡画像
-
-#     2x2のグリッドレイアウトを作成:
-#     | カメラ1 | カメラ2 |
-#     | 鳥瞰図  | 空白   |
-#     """
-#     # カメラ映像を横に連結
-#     camera_combined = cv2.hconcat(frames)
-
-#     # 鳥瞰図と空白領域を作成
-#     h, w = bird_eye_view.shape[:2]
-#     empty_space = np.zeros((h, w, 3), dtype=np.uint8)
-
-#     # 下段を横に連結
-#     bottom_row = cv2.hconcat([bird_eye_view, empty_space])
-
-#     # カメラ映像と鳥瞰図のサイズを合わせる
-#     if camera_combined.shape[1] != bottom_row.shape[1]:
-#         # 幅を合わせる
-#         scale = bottom_row.shape[1] / camera_combined.shape[1]
-#         camera_combined = cv2.resize(camera_combined, (bottom_row.shape[1], int(camera_combined.shape[0] * scale)))
-
-#     # 上段と下段を縦に連結
-#     grid_layout = cv2.vconcat([camera_combined, bottom_row])
-
-#     return grid_layout
-
-
-# def create_grid_layout(annotated_frames: list[np.ndarray],
-#                        bird_eye_view: np.ndarray) -> np.ndarray:
-#     """
-#     カメラからのアノテート済み映像群と鳥瞰図を受け取り、
-#     上段にカメラ映像を横連結、下段に鳥瞰図を同じ幅でリサイズして縦連結した
-#     "2段構成" の出力フレームを返す。
-
-#     Args:
-#         annotated_frames: 各カメラ映像にBBoxやIDラベルを描画した後の画像リスト
-#         bird_eye_view: オフィスマップ上に軌跡を描画した鳥瞰図（office_mapサイズ）
-
-#     Returns:
-#         grid: (H_total×W) の合成画像
-#     """
-#     # ---- 上段：カメラ映像を横に連結 ----
-#     # annotated_frames: [frame1, frame2, ...]
-#     camera_row = cv2.hconcat(annotated_frames)
-
-#     # ---- 下段：鳥瞰図を横連結幅に合わせてリサイズ ----
-#     target_w = camera_row.shape[1]
-#     be_h, be_w = bird_eye_view.shape[:2]
-#     scale = target_w / be_w
-#     # 縦横比を維持してリサイズ
-#     bird_eye_resized = cv2.resize(
-#         bird_eye_view,
-#         (target_w, int(be_h * scale)),
-#         interpolation=cv2.INTER_LINEAR
-#     )
-
-#     # ---- 全体を縦連結 ----
-#     grid = cv2.vconcat([camera_row, bird_eye_resized])
-#     return grid
-
-
-def create_grid_layout(frames: List[np.ndarray], bird_eye_view: np.ndarray) -> np.ndarray:
-    """
-    frames: 各カメラ映像に矩形＋IDを描画したあとの画像リスト
-    bird_eye_view: オフィスマップ上に描画した鳥瞰図画像
-
-    出力するグリッド:
-    ┌───────────────┐
-    │ カメラ1｜カメラ2 │  ← frames を横連結
-    ├───────────────┤
-    │   鳥瞰図           │  ← 上段幅に合わせてリサイズ
-    └───────────────┘
-    """
-    # 1) カメラ映像を横に連結
-    camera_row = cv2.hconcat(frames)
-
-    # 2) 鳥瞰図を上段と同じ幅にリサイズ
-    h_c, w_c = camera_row.shape[:2]
-    h_b, w_b = bird_eye_view.shape[:2]
-    scale = w_c / w_b
-    bird_resized = cv2.resize(
-        bird_eye_view,
-        (w_c, int(h_b * scale))
-    )
-
-    # 3) 上段＋下段を縦連結
-    grid = cv2.vconcat([camera_row, bird_resized])
-    return grid
-
-
 def create_horizontal_layout(frames, bird_eye_view):
     """
     frames: カメラからの映像のリスト
@@ -450,7 +357,9 @@ def multi_camera_tracking(source_videos, output_path, office_map_path, homograph
         print(f"出力ディレクトリを作成しました: {output_dir}")
 
     # 1) 共通コンポーネント準備
-    model = YOLO("yolo11s.pt")
+    # model = YOLO("yolo11s.pt")
+    # model = RFDETRBase()
+    model = get_model("rfdetr-base")
     extractor = FeatureExtractor(
         model_name='osnet_x0_25',
         device='cuda' if torch.cuda.is_available() else 'cpu',
@@ -509,12 +418,6 @@ def multi_camera_tracking(source_videos, output_path, office_map_path, homograph
     grid_width = max(w * n_cams, map_w * 2)
     grid_height = h + map_h
 
-    # writer = cv2.VideoWriter(
-    #     output_path,
-    #     fourcc,
-    #     fps,
-    #     (grid_width, grid_height),
-    # )
     writer = None
 
     # ID ごとの色マッピングと軌跡履歴
@@ -539,15 +442,69 @@ def multi_camera_tracking(source_videos, output_path, office_map_path, homograph
         # 各カメラで検出→トラッカー更新
         all_feats, all_dets, all_local_ids = [], [], []
         for idx, frame in enumerate(frames):
-            result = model(
-                frame,
-                conf=0.25,
-                iou=0.45,
-                classes=[0],
-            )[0]
-            dets = sv.Detections.from_ultralytics(result)
+            # 1) モデル推論（1フレームあたり1つの ObjectDetectionInferenceResponse が返る）
+            response_list = model.infer(frame, confidence=0.5)
+
+            # 2) 万一、推論結果リストが空なら Detections.empty() を使う
+            if not response_list:
+                dets = sv.Detections.empty()
+                all_dets.append(dets)
+                continue
+
+            # 3) 推論結果オブジェクトを取り出す
+            response = response_list[0]  # ObjectDetectionInferenceResponse 型
+
+            # 4) 内部にある 'predictions' リストを取り出す
+            #    これが ObjectDetectionPrediction のリストになる
+            all_preds = response.predictions  # list[ObjectDetectionPrediction, ...]
+
+            # 5) その中から「class_id が 1 ＝ person（人）」のものだけを抽出
+            #    ※COCOでは person の class_id が 1（あなたの出力を見た限り）
+            person_preds = [
+                p for p in all_preds
+                if getattr(p, "class_id", None) == 1
+            ]
+
+            # 6) 抽出した人クラスのリスト（person_preds）を
+            #     BoxAnnotator やトラッカーが使える形式に直す必要がある
+            #
+            #    Supervision の sv.Detections の場合、以下のように
+            #    ・xyxy（左上座標・右下座標をまとめた NumPy 配列）
+            #    ・confidence（NumPy 配列）
+            #    ・class_id （NumPy 配列）
+            #    を手動で作成してやる必要がある。
+            import numpy as np
+
+            # 6-1) xyxy（バウンディングボックスを [x1, y1, x2, y2] に変換）
+            #       p.x, p.y は中心座標、p.width, p.height は幅・高さなので、
+            #       左上= (x - w/2, y - h/2)、右下= (x + w/2, y + h/2)
+            xyxy = np.array([
+                [
+                    p.x - p.width / 2,
+                    p.y - p.height / 2,
+                    p.x + p.width / 2,
+                    p.y + p.height / 2,
+                ]
+                for p in person_preds
+            ])
+
+            # 6-2) confidence と class_id も NumPy 配列にする
+            confidence = np.array([p.confidence for p in person_preds])
+            class_id = np.array([p.class_id for p in person_preds])
+
+            # 6-3) sv.Detections インスタンスを生成
+            dets = sv.Detections(
+                xyxy=xyxy,
+                confidence=confidence,
+                class_id=class_id
+            )
+
+            # 7) トラッカー（DeepSORT など）に渡して更新を行う
             dets = tracker_list[idx].update(dets, frame)
+
+            # 8) 最終的な検出結果（人のみトラッキング済み）をリストに追加
             all_dets.append(dets)
+
 
             # 特徴ベクトルを抽出
             if len(dets) > 0:
@@ -646,45 +603,6 @@ def multi_camera_tracking(source_videos, output_path, office_map_path, homograph
             office_map, all_dets, H_list, track_history, max_history=30, colors=id_colors
         )
 
-        # カメラ映像に矩形＋ID を描画して annotated を作成
-        # annotated = []
-        # for frame, dets, local_ids in zip(frames, all_dets, all_local_ids):
-        #     confidences = getattr(dets, "confidence", None)
-        #     if confidences is None:
-        #         confidences = np.zeros(len(dets))
-
-        #     # 各検出ごとにラベルを作成
-        #     labels = []
-        #     for i in range(len(dets)):
-        #         if hasattr(dets, 'tracker_id'):
-        #             g_id = dets.tracker_id[i]
-        #             l_id = local_ids[i] if i < len(local_ids) else -1
-        #             conf = confidences[i]
-        #             labels.append(f"G{g_id} L{l_id} {conf:.2f}")
-
-        #     # 矩形とラベルを描画
-        #     f = box_annotator.annotate(frame, dets)
-        #     f = label_annotator.annotate(f, dets, labels=labels)
-        #     annotated.append(f)
-
-        # # グリッドを作成
-        # grid_layout = create_grid_layout(annotated, bird_eye_view)
-
-        # # writer は最初の１回だけ初期化
-        # if writer is None:
-        #     h_g, w_g = grid_layout.shape[:2]
-        #     writer = cv2.VideoWriter(
-        #         output_path,
-        #         fourcc,
-        #         fps,
-        #         (w_g, h_g)   # ← (幅, 高さ) の順番に注意
-        #     )
-        #     if not writer.isOpened():
-        #         raise RuntimeError(f"VideoWriter の初期化に失敗: size={(w_g,h_g)}")
-
-        # # フレームを書き出し
-        # writer.write(grid_layout)
-
         annotated = []
         for frame, dets, local_ids in zip(frames, all_dets, all_local_ids):
             confidences = getattr(dets, "confidence", None)
@@ -733,18 +651,17 @@ def multi_camera_tracking(source_videos, output_path, office_map_path, homograph
 if __name__ == "__main__":
     # 入力ビデオパス
     source_videos = [
-        # "/home/ishii/projects/lightblue/data/multicam/output_bookshelf_20241025_110713.mp4",
-        # "/home/ishii/projects/lightblue/data/multicam/output_trashcan_20241025_110713.mp4",
-        "rtmp://192.168.0.106:1935/fairy_1",
-        "rtmp://192.168.0.106:1935/fairy_2",
-        # "rtmp://192.168.0.106:1935/fairy_3",
+        "../data/output_bookshelf_20241025_110713_trimmed.mp4",
+        "../data/output_trashcan_20241025_110713_trimmed.mp4",
+        # "rtmp://192.168.0.106:1935/fairy_1",
+        # "rtmp://192.168.0.106:1935/fairy_2",
     ]
 
     # 出力ビデオパス
-    output_path = "/home/ishii/projects/v1_thinklet_cube_mcmot/results/v2_stream_sample.mp4"
+    output_path = "../results/v2_stream_sample_person.mp4"
 
     # オフィスマップのパス
-    office_map_path = "/home/ishii/projects/pbox_trackers/results/office.png"
+    office_map_path = "../data/office.png"
 
     # ホモグラフィ行列（カメラからオフィスマップへの変換）
     # 注: 実際のホモグラフィ行列に置き換える必要があります
@@ -760,8 +677,8 @@ if __name__ == "__main__":
         [0.0001, -0.0001, 1]
     ])
     # ホモグラフィ行列をnpyファイルから読み込む
-    H1_path = "/home/ishii/projects/pbox_trackers/results/homography_bookshelf_to_blueprint.npy"
-    H2_path = "/home/ishii/projects/pbox_trackers/results/homography_trashcan_to_blueprint.npy"
+    H1_path = "../data/homography/homography_bookshelf_to_blueprint.npy"
+    H2_path = "../data/homography/homography_trashcan_to_blueprint.npy"
     H1 = np.load(H1_path, allow_pickle=True)
     H2 = np.load(H2_path, allow_pickle=True)
     homography_matrices = [H1, H2]
